@@ -1,0 +1,57 @@
+* {
+	padding: 0;
+	margin: 0;
+}
+body {
+	background: url('bg.jpg') 0 20% no-repeat;
+	background-size: cover;
+	font-family: 'Homemade Apple', cursive;
+	color: white;
+}
+div.content {
+	border: white 1px solid;
+	max-width: 300px;
+	border-radius: 15px;
+	margin: 50px auto 0 auto;
+	box-shadow: 0 0 40px 10px black;
+	text-align: center;
+	padding: 20px;
+}
+div.photo {
+	background: url('i.jpg') 0 0 no-repeat;
+	background-size: cover;
+	width: 100px;
+	height: 100px;
+	border-radius: 50% 50%;
+	margin: auto;
+}
+div.name {
+	font-size: 20pt;
+	margin-top: 25px;
+}
+div.city {
+	font-size: 18pt;
+}
+div.social {
+	margin-top: 25px;
+}
+div.social li {
+	display: inline;
+	list-style-type: none;
+	padding-right: 20px;
+}
+div.social a, div.social a:visited, div.social a:hover, div.social a:focus {
+	text-decoration: none;
+	color: white;
+}
+div.social a span {
+	display: inline-block;
+	font-size: 25pt;
+	border: white 1px solid;
+	border-radius: 50% 50%;
+	width: 45px;
+	height: 45px;
+	line-height: 47px;
+	text-align: center;
+	vertical-align: middle;
+}

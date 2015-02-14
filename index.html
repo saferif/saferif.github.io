@@ -1,13 +1,24 @@
----
-layout: default
-title: Главная
----
-
-<div id="home">
-  <h1>Посты</h1>
-  <ul class="posts">
-    {% for post in site.posts %}
-      <li><span>{{ post.date | date_to_string }}</span> &raquo; <a href="{{ post.url }}">{{ post.title }}</a></li>
-    {% endfor %}
-  </ul>
-</div>
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<link href='http://fonts.googleapis.com/css?family=Homemade+Apple' rel='stylesheet' type='text/css'>
+	<link type="text/css" rel="stylesheet" href="style.css">
+	<link type="text/css" rel="stylesheet" href="social.css">
+	<title>Insaf Latypov | Saferif</title>
+</head>
+<body>
+	<div class="content">
+		<div class="photo"></div>
+		<div class="name">Insaf Latypov</div>
+		<div class="city">Moscow</div>
+		<div class="social">
+			<ul>
+				<li><a href="https://vk.com/saferif"><span data-icon="&#xe003;"></span></a></li>
+				<li><a href="skype:saferif?chat"><span data-icon="&#xe00a;"></span></a></li>
+				<li><a href="mailto:saferif@gmail.com"><span data-icon="&#xe023;"></span></a></li>
+			</ul>
+		</div>
+	</div>
+</body>
+</html>
