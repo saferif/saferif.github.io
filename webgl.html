@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8"/>
+		<title>WebGL</title>
+		<script type="x-shader/x-fragment" id="shader-fs">
+			precision highp float;
+
+			uniform vec3 iResolution;
+			uniform float iGlobalTime;
+			
+			// константы, которые мы наверняка будем настраивать
+			#define MAX_STEPS 64
+			#define EPSILON .001
+			#define MAX_REFLECTIONS 4
+
+			float t = iGlobalTime;
+
+			// описание материала
+			struct material_t {
+				vec3 diffuse;
+				float specular;
+				float reflectivity;
+			};
+
+			// отдельно пол
+			float s_floor(vec3 a) {
+				return a.y + 1.;
+			}
+
+			// и шар
+			float s_ball(vec3 a) {
+				float phase = .5 * mod(t, 2.);
+				a -= vec3(0.,2.*phase*(1. - phase), 0.);
+				return length(a) - 1.;
+			}
+			float s_ball_red(vec3 a) {
+				return length(a-vec3(1.5*sin(t*1.2), -.5, 1.5*cos(t*1.2))) - .5;
+			}
+			float s_ball_green(vec3 a) {
+				return length(a-vec3(2.5*sin(-t*.7), -.4, 2.5*cos(t*.7))) - .6;
+			}
+
+			// функция расстояния для нашего маленького уютного виртуального мира
+			float world(vec3 a) {
+				return min(min(min(s_ball_red(a),s_ball_green(a)),s_ball(a)), s_floor(a));
+			}
+
+			// возвращаем материал для указанной точки
+			material_t wmaterial(vec3 a) {
+				// начинаем с материала шара
+				material_t m = material_t(vec3(.5, .56, 1.), 200., 1.);
+				float closest = s_ball(a);
+				
+				// проверяем следующий объект сцены -- пол
+				float sample = s_floor(a);
+				// если он оказался ближе
+				if (sample < closest) {
+					// запоминаем как ближайший
+					closest = sample;
+					// выставляем его материал -- диффузная шахматрная доска
+					m.diffuse = vec3(1.-mod(floor(a.x)+floor(a.z), 2.));
+					m.specular = 0.;
+					m.reflectivity = .2;
+				}
+				
+				sample = s_ball_red(a);
+				if (sample < closest) {
+					closest = sample;
+					m.diffuse = vec3(1.,.4,.3);
+					m.specular = 20.;
+					m.reflectivity = .8;
+				}
+				
+				sample = s_ball_green(a);
+				if (sample < closest) {
+					closest = sample;
+					m.diffuse = vec3(.3,1.,.2);
+					m.specular = 50.;
+					m.reflectivity = .9;
+				}
+				return m;
+			}
+
+			// функция трассировки луча из точки O в нормализованном направлении D. возвращает пройденное расстояние
+			// возвращает отрицательное число, если выход произошел раньше, чем было найдено пересечение
+			float trace(vec3 O, vec3 D, float l_min) {
+				float L = l_min; // пройденное расстояние
+				for (int i = 0; i < MAX_STEPS; ++i) { // для MAX_STEPS шагов
+					float d = world(O + D*L); // получаем расстояние до ближайшей геометрии
+					L += d; // шагаем на это расстояние
+					if (d < EPSILON*L) { L = -L; break; } // если оно меньше порогового значения, выходим
+				}
+				return -L; // возвращаем пройденное расстояние
+			}
+
+			// нормаль -- это походу градиент
+			vec3 wnormal(vec3 a) {
+				vec2 e = vec2(.001, 0.);
+				float w = world(a);
+				return normalize(vec3(
+					world(a+e.xyy) - w,
+					world(a+e.yxy) - w,
+					world(a+e.yyx) - w));
+			}
+
+			vec3 enlight(vec3 at, vec3 normal, vec3 eye, material_t m, vec3 l_color, vec3 l_pos) {
+				// направление на источник света из текущей точки
+				vec3 l_dir = l_pos - at;
+				// пускаем луч в источник света и проверяем, не уперлись ли во что по пути
+				if (trace(at, normalize(l_dir), EPSILON*2.) > -length(l_dir))
+					return vec3(0.);
+				// цвет = произведение цветов источника и поверхности
+				// освещенность = косинус угла (=скалярное произведение нормализованных векторов)
+				// ну и надо не забывать про то, что отрицательный косинус просто не будет давать света
+				vec3 color = m.diffuse * l_color * max(0.,dot(normal,normalize(l_dir)));
+				
+				// блики
+				if (m.specular > 0.) {
+					// пользуемся, блин, фонгом -- строим срединный вектор между камерой и источником
+					vec3 h = normalize(normalize(l_dir) + normalize(eye-at));
+					// БДЫЩ и нормализация в конце
+					color += l_color * pow(max(0.,dot(normal,h)), m.specular) * (m.specular + 8.) / 25.;
+				}
+				// поделим полученное на квадрат расстояния до источника света (=скалярное произведение с собой)
+				return color / dot(l_dir, l_dir);
+			}
+
+			// коэффициент подстаканной тени
+			float occlusion(vec3 at, vec3 normal) {
+				// изначально считаем, что затенения вообще нет
+				float b = 0.;
+				// делаем четыре шага
+				for (int i = 1; i <= 4; ++i) {
+					// с промежутком .06 -- этот параметр можно тюнить
+					float L = .06 * float(i);
+					float d = world(at + normal * L);
+					// добавляем к коэффициенту ограниченную разницу расстояний между пройденным и минимальным
+					b += max(0., L - d);
+				}
+				// коэффициент больше 1 не имеет смысла
+				return min(b, 1.);
+			}
+
+			void main(void) {
+				// нормализуем экранные координаты к [-1., 1.]
+				vec2 uv = gl_FragCoord.xy / iResolution.xy * 2. - 1.;
+
+				// исправляем соотношение сторон экрана
+				uv.x *= iResolution.x / iResolution.y;
+				
+				// точка начала
+				vec3 O = vec3(0., 0., 4.);
+
+				// смотрим в отрицательном по оси z направлении; -2. в z имеет смысл тангенса угла обзора или что-то такое
+				vec3 D = normalize(vec3(uv, -2.));
+				
+				// суммарный цвет пикселя со всеми сложенными отражениями
+				vec3 result_color = vec3(0.);
+				
+				// вес текущего луча
+				float k_reflectivity = 1.;
+				
+				for (int i = 0; i < MAX_REFLECTIONS; ++i) {
+					// вычисляем пройденный путь
+					float path = trace(O, D, 0.);
+					
+					// если ни на что не наткнулись, закругляемся
+					if (path < 0.) break;
+					
+					// точка, в которую пришли	
+					vec3 pos = O + D * path;
+					vec3 nor = wnormal(pos);
+				
+					// материал в текущей точке
+					material_t mat = wmaterial(pos);
+				
+					// освещение окружения
+					vec3 color = .15 * (1. - occlusion(pos, nor)) * mat.diffuse;
+				
+					// освещение из источника
+					color += enlight(pos, nor, O, mat, vec3(1., 1.5, 2.), vec3(2.*cos(t), 2., 2.*sin(t)));
+					color += enlight(pos, nor, O, mat, vec3(2., 1.5, 1.), vec3(2.*sin(t*.6), 3., 2.*cos(t*.6)));
+				
+					// как-бы туман
+					color = mix(color, vec3(0.), smoothstep(0.,20.,path));
+					
+					// добавим текущий цвет к суммарному
+					result_color += k_reflectivity * color;
+					
+					// получим коэффициент следующего луча
+					k_reflectivity *= mat.reflectivity;
+					
+					// выйдем, если вклад будет слишком мал
+					if (k_reflectivity < .1) break;
+					
+					// отразим луч и начнем с текущей позиции
+					D = normalize(reflect(D, nor));
+					O = pos + D * EPSILON*2.;
+				}
+
+				// выводим суммарный цвет	
+				gl_FragColor = vec4(result_color, 0.);
+}
+		</script>
+		<script type="x-shader/x-vertex" id="shader-vs">
+			attribute vec2 aVertexPosition;
+
+			void main(void) {
+				gl_Position = vec4(aVertexPosition, 0., 1.);
+			}
+		</script>
+		<script type="text/javascript">
+			function getContext(canvas) {
+				var names = ["webgl", "experimental-webgl", "webkit-3d", "moz-webgl"];
+				var gl = null;
+				for (var i = 0; i < names.length; ++i) {
+					try {
+						gl = canvas.getContext(names[i], { alpha: false });
+					}
+					catch(e) {}
+					if (gl) break;
+				}
+				return gl;
+			}
+			function initGL(canvas) {
+				var computedStyle = getComputedStyle(canvas);
+
+				canvas.width = parseInt(computedStyle.width);
+				canvas.height = parseInt(computedStyle.height);
+				var gl = getContext(canvas);
+				if (!gl) {
+					alert("Could not initialize WebGL");
+				}
+				return gl;
+			}
+			function getShader(gl, id) {
+				var shaderScript = document.getElementById(id);
+				if (!shaderScript) return null;
+
+				var code = "";
+				var k = shaderScript.firstChild;
+				while (k) {
+					if (k.nodeType == 3) code += k.textContent;
+					k = k.nextSibling;
+				}
+
+				var shader;
+				if (shaderScript.type == "x-shader/x-fragment") shader = gl.createShader(gl.FRAGMENT_SHADER);
+				else if (shaderScript.type == "x-shader/x-vertex") shader = gl.createShader(gl.VERTEX_SHADER);
+				else return null;
+
+				gl.shaderSource(shader, code);
+				gl.compileShader(shader);
+
+				if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+					alert(gl.getShaderInfoLog(shader));
+					gl.deleteShader(shader);
+					return null;
+				}
+
+				return shader;
+			}
+			function cleanUpShaders(gl, shaderProgram, fragmentShader, vertexShader) {
+				gl.detachShader(shaderProgram, fragmentShader);
+				gl.deleteShader(fragmentShader);
+				gl.detachShader(shaderProgram, vertexShader);
+				gl.deleteShader(vertexShader);
+			}
+			function initShaders(gl) {
+				var fragmentShader = getShader(gl, "shader-fs");
+				var vertexShader = getShader(gl, "shader-vs");
+
+				var shaderProgram = gl.createProgram();
+				gl.attachShader(shaderProgram, fragmentShader);
+				gl.attachShader(shaderProgram, vertexShader);
+				gl.linkProgram(shaderProgram);
+
+				if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+					alert("Could not initialize shaders");
+					cleanUpShaders(gl, shaderProgram, fragmentShader, vertexShader);
+					gl.deleteProgram(shaderProgram);
+					return null;
+				}
+				cleanUpShaders(gl, shaderProgram, fragmentShader, vertexShader);
+				gl.useProgram(shaderProgram);
+
+				shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+				gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+				shaderProgram.iResolutionUniform = gl.getUniformLocation(shaderProgram, "iResolution");
+				shaderProgram.iGlobalTime = gl.getUniformLocation(shaderProgram, "iGlobalTime");
+
+				return shaderProgram;
+			}
+			function initBuffers(gl) {
+				var vertexBuffer = gl.createBuffer();
+				gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+				var vertices = [
+					-1.0, -1.0,
+					 1.0, -1.0,
+					-1.0,  1.0,
+					 1.0, -1.0,
+					 1.0,  1.0,
+					-1.0,  1.0 
+				];
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+				vertexBuffer.itemSize = 2;
+				vertexBuffer.numItems = 6;
+				return vertexBuffer;
+			}
+			function setUniforms(gl, shaderProgram, timestamp) {
+				gl.uniform3f(shaderProgram.iResolutionUniform, gl.drawingBufferWidth, gl.drawingBufferHeight, 1.0);
+				gl.uniform1f(shaderProgram.iGlobalTime, timestamp / 1000.);
+			}
+			function drawScene(gl, vertexBuffer, shaderProgram, timestamp) {
+				gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+				gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, vertexBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				setUniforms(gl, shaderProgram, timestamp);
+				gl.drawArrays(gl.TRIANGLES, 0, vertexBuffer.numItems);
+			}
+			function init() {
+				var image = document.getElementById("my-img");
+				var canvas = document.getElementById("my-canvas");
+				var gl = initGL(canvas);
+				var shaderProgram = initShaders(gl);
+				var vertexBuffer = initBuffers(gl);
+
+				gl.clearColor(0.0, 0.0, 0.0, 1.0);
+				gl.enable(gl.DEPTH_TEST);
+
+				requestAnimationFrame(function(timestamp) {
+					drawScene(gl, vertexBuffer, shaderProgram, timestamp);
+					requestAnimationFrame(arguments.callee, canvas);
+				}, canvas);
+				// drawScene(gl, vertexBuffer, shaderProgram, 27500);
+				// image.src = canvas.toDataURL("image/png");
+			}
+		</script>
+		<style type="text/css">
+			canvas {
+				width: 640px;
+				height: 480px;
+				/*display: none;*/
+			}
+		</style>
+	</head>
+	<body>
+		<canvas id="my-canvas"></canvas>
+		<img id="my-img"/>
+		<script type="text/javascript">
+			init();
+		</script>
+	</body>
+</html>
